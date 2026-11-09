@@ -46,8 +46,8 @@ TWO THINGS TO BE CLEAR ABOUT
    kinetics: DHAM and MSM estimators work perfectly well on it, provided transition
    pairs are taken only WITHIN a continuous segment between exchanges.  Use
    `transition_counts_continuous` below instead of a naive count, and you lose only the
-   handful of pairs that cross a swap (about 6% in the demo - see
-   `contaminated_transition_fraction`).  Free energies need no such care at all:
+   pairs that cross a swap (see `contaminated_transition_fraction` for the price).
+   Free energies need no such care at all:
    detailed balance holds and every window's equilibrium distribution is exactly the one
    it had before.
 

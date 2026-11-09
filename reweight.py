@@ -157,18 +157,11 @@ def weight_diagnostics(weights, top_k: int = 10, min_kish_fraction: float = 5e-3
     Returns the Kish effective sample size (1 / sum w^2), the largest single weight, and
     the share carried by the top_k samples.
 
-    The default thresholds are calibrated on this package's own two cases:
-
-      * a converged run (20 images, long production) gives kish_fraction 1.4% and a
-        largest weight of 1.5%, and reproduces the exact barrier to 0.015 kT;
-      * an under-converged run (fewer images, short production) gives kish_fraction
-        0.016% with ONE sample holding 50% of the probability, and is worthless.
-
-    So `max_single_weight = 0.05` asks that no single frame carry more than a twentieth
-    of the distribution, and `min_kish_fraction = 5e-3` asks for at least one effective
-    sample per two hundred collected.  Treat `healthy` as a coarse screen and read the
-    numbers: what matters is kish_ess in absolute terms (a few hundred effective samples
-    is a reasonable basis for a PMF; four is not).
+    The defaults ask that no single frame carry more than a twentieth of the
+    distribution (`max_single_weight`) and that there be at least one effective sample
+    per two hundred collected (`min_kish_fraction`).  Treat `healthy` as a coarse screen
+    and read the numbers: what matters is `kish_ess` in absolute terms - a few hundred
+    effective samples is a reasonable basis for a PMF, a handful is not.
     """
     w = np.asarray(weights, dtype=float)
     w = w / w.sum()

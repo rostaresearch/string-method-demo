@@ -12,12 +12,11 @@ They are not the same.  A single window whose trajectory wanders back and forth 
 a region generates flux there even if no *pair* of windows overlaps in that region, and
 conversely two windows can overlap statically while almost nothing crosses between them.
 
-This distinction is easy to learn the hard way.  A region can show zero pairwise
-histogram overlap and still be fully connected in the transition graph - while its
-weakest boundary carries three orders of magnitude fewer crossings than the median.  A
-transition-matrix estimator will report a confident barrier straight through such a
-bottleneck, while mean force, which needs neither overlap nor flux, disagrees by a
-factor of two.  So: check both, and quote the minimum, not the average.
+A region can show zero pairwise histogram overlap and still be fully connected in the
+transition graph, and a boundary can be connected by very few crossings while its
+neighbours carry thousands.  A transition-matrix estimator will report a barrier straight
+through such a bottleneck without complaint.  So: check both quantities, and quote the
+minimum over boundaries, not the average.
 """
 from __future__ import annotations
 
