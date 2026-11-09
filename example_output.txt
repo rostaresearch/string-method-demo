@@ -1,0 +1,78 @@
+3-D analytical system
+  kT                      0.400
+  analytic gradient check 8.64e-10 (max abs vs central differences)
+  restraint sigma         0.1414   (sqrt(kT/k), k = 20.0)
+  integrator stability    0.050   (keep well below 1)
+  straight-line guess passes through V(0,0,0) = 3.81, wells at -2.73
+
+phase 1: converging the string (20 images)
+  iter   1   arc  2.0941   max move  0.0921   min overlap 0.496
+  iter   2   arc  2.2738   max move  0.2381   min overlap 0.495
+  iter   3   arc  2.4561   max move  0.2021   min overlap 0.439
+  iter   4   arc  2.6174   max move  0.1281   min overlap 0.495
+  iter   5   arc  2.7322   max move  0.0942   min overlap 0.445
+  iter   6   arc  2.8278   max move  0.0638   min overlap 0.399
+  iter   7   arc  2.8848   max move  0.0422   min overlap 0.424
+  iter   8   arc  2.9482   max move  0.0399   min overlap 0.457
+  iter   9   arc  2.9935   max move  0.0296   min overlap 0.429
+  iter  10   arc  3.0233   max move  0.0267   min overlap 0.425
+  iter  11   arc  3.0749   max move  0.0224   min overlap 0.453
+  iter  12   arc  3.0828   max move  0.0349   min overlap 0.343
+  iter  13   arc  3.0960   max move  0.0217   min overlap 0.453
+  iter  14   arc  3.0985   max move  0.0240   min overlap 0.312
+  iter  15   arc  3.1153   max move  0.0177   min overlap 0.400
+  iter  16   arc  3.1009   max move  0.0251   min overlap 0.464
+  iter  17   arc  3.1329   max move  0.0313   min overlap 0.343
+  iter  18   arc  3.1404   max move  0.0240   min overlap 0.414
+  iter  19   arc  3.1676   max move  0.0317   min overlap 0.455
+  iter  20   arc  3.1810   max move  0.0227   min overlap 0.372
+  iter  21   arc  3.1780   max move  0.0262   min overlap 0.426
+  iter  22   arc  3.1576   max move  0.0207   min overlap 0.473
+  iter  23   arc  3.1553   max move  0.0224   min overlap 0.472
+  iter  24   arc  3.1619   max move  0.0261   min overlap 0.378
+  iter  25   arc  3.1445   max move  0.0265   min overlap 0.373
+  iter  26   arc  3.1589   max move  0.0186   min overlap 0.439
+  iter  27   arc  3.1626   max move  0.0301   min overlap 0.323
+  iter  28   arc  3.1501   max move  0.0199   min overlap 0.431
+  iter  29   arc  3.1866   max move  0.0353   min overlap 0.383
+  iter  30   arc  3.1849   max move  0.0377   min overlap 0.383
+  iter  31   arc  3.1890   max move  0.0273   min overlap 0.414
+  iter  32   arc  3.1793   max move  0.0277   min overlap 0.376
+  iter  33   arc  3.1678   max move  0.0247   min overlap 0.430
+  iter  34   arc  3.1746   max move  0.0174   min overlap 0.371
+  iter  35   arc  3.1619   max move  0.0229   min overlap 0.434
+  iter  36   arc  3.1346   max move  0.0214   min overlap 0.403
+  iter  37   arc  3.1689   max move  0.0244   min overlap 0.394
+  iter  38   arc  3.1543   max move  0.0282   min overlap 0.389
+  iter  39   arc  3.1594   max move  0.0255   min overlap 0.466
+  iter  40   arc  3.1601   max move  0.0303   min overlap 0.472
+
+phase 2: production umbrella sampling on the converged string
+  20 windows x 4000 frames = 80000 samples
+  restraints sample a tube of perpendicular radius 0.408 (99.5th pct; restraint sigma 0.141)
+
+phase 3: binless WHAM
+  solver: {'iterations': 21, 'converged': True, 'max_gradient': 0.0011067599921261717}
+  window free energies f (kT), first five: [0.0, 0.33, 1.234, 2.542, 3.856]
+  self-consistent vs L-BFGS on identical data: 1.22e-05 kT (1041 iterations)
+
+  barrier along the path (energy units; kT = 0.40):
+    exact, tube-restricted  2.326   <- like-for-like reference for umbrellas
+    binless WHAM            2.332   <- should match the line above
+    exact, ALL space        1.928   <- a different quantity (see README)
+    mean force              1.706   <- path-tangent integral, not the
+                                      projected PMF (see README)
+
+phase 4: sampling diagnostics
+  overlap_min              0.433
+  overlap_median           0.59
+  overlap_predicted_min    0.5462
+  spacing_median           0.1647
+  restraint_sigma          0.1414
+  spacing_over_sigma_max   1.2069
+  flux_min                 2616.0
+  flux_median              3575.0
+  flux_n_below_50          0
+
+wrote fig1_string.png, fig2_free_energy.png, fig3_reprojection.png in
+  C:\Users\edina\Dropbox\method\NTP\string_method_demo
