@@ -1,0 +1,45 @@
+part 2: Hamiltonian replica exchange
+  16 images, k = 20.0, restraint sigma = 0.1414
+  exchange sweep: parity 0 = [(0, 1), (2, 3), (4, 5)]
+                  parity 1 = [(1, 2), (3, 4), (5, 6)]
+
+  string WITHOUT exchange
+    final arc 3.1182, mean |move| over last 5 iters 0.0281
+  string WITH exchange every 200 steps
+    final arc 3.1626, mean |move| over last 5 iters 0.0240
+    (see figure 4A: on this system HREX does NOT measurably speed up the
+     string itself - the windows already overlap well and a 3-D toy has no
+     slow orthogonal degrees of freedom for exchange to help with.  The gain
+     in a real system comes from those, not from the path.)
+    mean acceptance over the run 0.358
+    replica span (windows) mean 4.1, max 8, full traversals 0
+
+  production on the same path, both schemes (identical MD budget)
+    16 windows x 3000 frames each
+    exchange: {'acceptance_min': 0.193, 'acceptance_mean': 0.321, 'acceptance_max': 0.467, 'total_attempts': 4500.0, 'replica_span_mean': 13.375, 'replica_span_max': 15.0, 'n_full_traversals': 8}
+
+  barrier along the path (energy units; kT = 0.40):
+    exact, tube-restricted  2.295
+    binless WHAM, no exchange   2.301
+    binless WHAM, with HREX     2.241
+    HREX - no exchange          -0.060   <- should be ~0: HREX must not
+                                          change free energies
+
+  what HREX costs a KINETIC estimator:
+    transition flux, no exchange : min   1390  median   2064
+    transition flux, with HREX   : min   1464  median   2090
+    The magnitudes look similar: with well-overlapping windows a swap moves
+    a configuration about as far as ordinary diffusion over one save stride,
+    so the flux numbers alone do NOT reveal the problem.  The exact statement:
+    contaminated transitions (teleports, not dynamics): 6.0% overall, worst window 8.9%
+    Those transitions never happened, so DHAM/MSM/rate estimates must come
+    from exchange-free runs regardless of how the flux histogram looks.
+
+  acceptance vs neighbour spacing (string thinned 1x, 2x, 3x, 4x)
+    thin 1x : D/sigma  1.47   measured 0.316   guide 0.339
+    thin 2x : D/sigma  2.92   measured 0.031   guide 0.014
+    thin 3x : D/sigma  4.30   measured 0.004   guide 0.000
+    thin 4x : D/sigma  5.77   measured 0.000   guide 0.000
+
+wrote fig4_hrex.png, fig5_hrex_pmf.png in
+  C:\Users\edina\Dropbox\method\NTP\string_method_demo

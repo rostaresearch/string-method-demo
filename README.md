@@ -253,6 +253,113 @@ image spacing can overlap at all: `2*Phi(-D/2sigma)` with `sigma = sqrt(kT/k)`.
 
 ---
 
+## Part 2: Hamiltonian replica exchange
+
+```bash
+python run_demo_hrex.py
+```
+
+The 2011 study combined the string method with Hamiltonian replica exchange, and `hrex.py`
+adds that second ingredient. Every window runs the same unbiased potential and differs
+only in its restraint, so proposing to swap the configurations held by windows *i* and
+*j* costs nothing but two restraint evaluations - the `V` terms cancel:
+
+```
+Delta  =  [ U_i(x_j) + U_j(x_i) - U_i(x_i) - U_j(x_j) ] / kT
+accept with probability min(1, exp(-Delta))
+```
+
+Neighbour pairs are swept in two alternating passes, so no window appears twice in one
+pass:
+
+```
+parity 0 :  1-2, 3-4, 5-6, ...
+parity 1 :  2-3, 4-5, 6-7, ...
+```
+
+Alternating the parity is what lets a configuration migrate along the whole string
+rather than rattling inside one pair. In the demo (16 windows, exchange every 200 steps,
+~32% acceptance) replicas span 13.4 of 15 windows on average, with 8 full traversals -
+figure 4C.
+
+### Does it speed up the string? Here, no - and that is worth knowing
+
+Figure 4A shows the two runs converging at essentially the same rate. That is an honest
+negative result, and the reason is instructive: these windows already overlap well, and
+a 3-D toy potential has no slow degrees of freedom orthogonal to the path. Exchange
+cannot help with a problem the system does not have.
+
+In a real system the gain comes precisely from those slow orthogonal coordinates - side
+chains, water networks, a loop that has to reorganise - where one window can be stuck in
+a conformation its neighbour has already escaped. Do not expect the speed-up to show up
+on a toy; do expect to need it on a protein.
+
+### Two things to be clear about
+
+**What is swapped.** We swap the *configurations* and leave window identities fixed, so
+window *k* always holds samples generated under bias *k*. **Record samples per window,
+not per replica, and the binless WHAM needs no change at all** - every sample still
+carries the bias of the window it was recorded in. Swapping the labels instead is
+formally equivalent but much easier to get wrong.
+
+**The free energy must be unchanged - and it is.** On the demo:
+
+| | barrier |
+|---|---|
+| exact, tube-restricted | 2.295 |
+| binless WHAM, no exchange | 2.301 |
+| binless WHAM, with HREX | 2.241 |
+
+a difference of 0.06, well inside statistical error. If HREX shifts your PMF by more
+than the noise, something is wrong with the implementation, not with the physics.
+
+### What HREX breaks
+
+An accepted exchange teleports a configuration between windows, so the saved trajectory
+is no longer continuous dynamics. Free energies are untouched; **kinetics are not**.
+
+It is tempting to look for this in the transition-flux histogram, but on this system the
+flux magnitudes barely move (min 1390 without exchange, 1464 with). That is not
+reassurance - with well-overlapping windows a swap displaces a configuration about as
+far as ordinary diffusion does over one save stride, so the histogram cannot reveal the
+problem. The honest statement is a direct count, which `contaminated_transition_fraction`
+provides:
+
+> **6.0% of recorded frame-to-frame transitions are teleports, not dynamics**
+> (worst window 8.9%)
+
+Those transitions never happened. So DHAM, MSM and rate estimates must come from
+exchange-free runs, regardless of how the flux histogram looks. The fraction scales as
+roughly `stride / exchange_every` times the acceptance, so you can predict it before you
+run.
+
+### Design guide
+
+`hrex.predicted_acceptance` gives `exp(-(D/sigma)^2 / 2)` with `sigma = sqrt(kT/k)`.
+The demo tests it by thinning the converged string by 1x, 2x, 3x and 4x, which scales the
+neighbour spacing while changing nothing else:
+
+| thinning | D / sigma | measured acceptance | guide |
+|---|---|---|---|
+| 1x | 1.47 | **0.316** | 0.339 |
+| 2x | 2.92 | **0.031** | 0.014 |
+| 3x | 4.30 | **0.004** | 0.000 |
+| 4x | 5.77 | **0.000** | 0.000 |
+
+Acceptance falls by two orders of magnitude between 1.5 and 4.3 sigma and is gone by 5.8.
+
+**The practical consequence.** A string whose neighbours sit five or six restraint sigma
+apart will see essentially no accepted exchanges, no matter how often you attempt them -
+HREX will cost you bookkeeping and buy you nothing. Check `D/sigma` first, exactly as you
+would check `predicted_gaussian_overlap` before trusting a WHAM result. If it is large,
+the fix is more images or a softer restraint, not more exchange attempts.
+
+![hrex](fig4_hrex.png)
+
+![hrex pmf](fig5_hrex_pmf.png)
+
+---
+
 ## Files
 
 | file | contents |
@@ -264,8 +371,11 @@ image spacing can overlap at all: `2*Phi(-D/2sigma)` with `sigma = sqrt(kT/k)`.
 | `reweight.py` | binless WHAM (two solvers), projections, mean force |
 | `diagnostics.py` | overlap and transition-flux diagnostics |
 | `plumed_bridge.py` | write per-image `plumed.dat`, read COLVARs back - the MD-engine bridge |
-| `run_demo.py` | end to end: converge, produce, estimate, check, plot |
-| `test_demo.py` | `pytest` - gradient, reparametrisation, and WHAM vs exact |
+| `hrex.py` | Hamiltonian replica exchange: the Metropolis move, the alternating sweep, diagnostics |
+| `run_demo.py` | part 1 end to end: converge, produce, estimate, check, plot |
+| `run_demo_hrex.py` | part 2: the same string with HREX, and what it does and does not change |
+| `test_demo.py` | `pytest` - gradient, reparametrisation, and WHAM vs exact (11 tests) |
+| `test_hrex.py` | `pytest` - the sweep, the move, and that HREX preserves the PMF (9 tests) |
 
 ## Adapting it to a real system
 
