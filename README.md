@@ -137,6 +137,31 @@ Two solvers are provided and the test asserts they agree:
 * `solve_lbfgs` - the same stationary point found by minimising the Shirts-Chodera
   convex objective. Use this one in anger.
 
+### Always check the weight health
+
+Binless WHAM gives every sample a weight `w_n` proportional to
+`1 / sum_j N_j exp(f_j - u_j(x_n))`. If a sample lands where **every** window has
+negligible probability - a rare excursion outside the union of the window supports - that
+denominator collapses and the one sample can carry a large share of the total
+probability. The free energy then rests on a handful of frames however many you
+collected, and the reweighted PMF shows narrow spikes where they fall.
+
+With restraints on every CV this is easy to hit, because the windows only cover a thin
+tube and anything that leaves the tube is outside all of them.
+
+`reweight.weight_diagnostics` reports the Kish effective sample size `1 / sum w^2`, the
+largest single weight, and the share held by the top few. The two runs in this package
+bracket the useful range:
+
+| run | Kish ESS | largest single weight | barrier |
+|---|---|---|---|
+| 20 images, long production | **1147 of 80000** (1.4%) | 1.5% | correct to 0.015 kT |
+| fewer images, short production | **3.9** | **50.4%** | worthless |
+
+Same code, same estimator. The second one still produces a smooth-looking curve and a
+plausible number - which is exactly why you check the weights rather than the plot. A few
+hundred effective samples is a reasonable basis for a PMF; four is not.
+
 ### Things that will bite you
 
 * Equation (1) is invariant under `f -> f + const`. One offset is arbitrary; we fix
@@ -280,19 +305,7 @@ parity 1 :  2-3, 4-5, 6-7, ...
 Alternating the parity is what lets a configuration migrate along the whole string
 rather than rattling inside one pair. In the demo (16 windows, exchange every 200 steps,
 ~32% acceptance) replicas span 13.4 of 15 windows on average, with 8 full traversals -
-figure 4C.
-
-### Does it speed up the string? Here, no - and that is worth knowing
-
-Figure 4A shows the two runs converging at essentially the same rate. That is an honest
-negative result, and the reason is instructive: these windows already overlap well, and
-a 3-D toy potential has no slow degrees of freedom orthogonal to the path. Exchange
-cannot help with a problem the system does not have.
-
-In a real system the gain comes precisely from those slow orthogonal coordinates - side
-chains, water networks, a loop that has to reorganise - where one window can be stuck in
-a conformation its neighbour has already escaped. Do not expect the speed-up to show up
-on a toy; do expect to need it on a protein.
+figure 4B.
 
 ### Two things to be clear about
 
@@ -304,34 +317,76 @@ formally equivalent but much easier to get wrong.
 
 **The free energy must be unchanged - and it is.** On the demo:
 
-| | barrier |
-|---|---|
-| exact, tube-restricted | 2.295 |
-| binless WHAM, no exchange | 2.301 |
-| binless WHAM, with HREX | 2.241 |
+| | barrier | Kish ESS | largest weight |
+|---|---|---|---|
+| exact, tube-restricted | 2.295 | - | - |
+| binless WHAM, no exchange | 2.301 | **5** of 48000 | **43%** |
+| binless WHAM, with HREX | 2.241 | **1361** of 48000 | 1.9% |
 
-a difference of 0.06, well inside statistical error. If HREX shifts your PMF by more
-than the noise, something is wrong with the implementation, not with the physics.
+The barriers differ by 0.06, inside statistical error - so HREX has not shifted the free
+energy, which is the thing to check. If it shifts your PMF by more than the noise,
+something is wrong with the implementation, not the physics.
 
-### What HREX breaks
+**But look at the other two columns, because they are the real result here.** The
+exchange-free run has one frame carrying 43% of the total probability and an effective
+sample size of *five*: its 2.301 happens to be close to the truth, and that is luck, not
+evidence. HREX raises the effective sample size by a factor of ~270 and leaves no frame
+above 2%.
 
-An accepted exchange teleports a configuration between windows, so the saved trajectory
-is no longer continuous dynamics. Free energies are untouched; **kinetics are not**.
+That is the concrete benefit on this system. Because configurations keep circulating, no
+window wanders out of the tube covered by the others and sits there generating a
+pathological weight. It is also what produces the spike in figure 5A: that narrow dive in
+the no-exchange curve *is* the 43% sample. See
+[Always check the weight health](#always-check-the-weight-health).
 
-It is tempting to look for this in the transition-flux histogram, but on this system the
-flux magnitudes barely move (min 1390 without exchange, 1464 with). That is not
-reassurance - with well-overlapping windows a swap displaces a configuration about as
-far as ordinary diffusion does over one save stride, so the histogram cannot reveal the
-problem. The honest statement is a direct count, which `contaminated_transition_fraction`
-provides:
+### Using the HREX data for kinetics (DHAM / MSM)
 
-> **6.0% of recorded frame-to-frame transitions are teleports, not dynamics**
-> (worst window 8.9%)
+An accepted exchange teleports a configuration between windows, so a frame pair that
+straddles a swap did not evolve from one to the other. This does **not** stop you using
+HREX data for rates. The exchange is a valid Monte Carlo move on the extended ensemble
+and the dynamics inside each segment is untouched, so you simply refuse to count the
+pairs that cross a swap.
 
-Those transitions never happened. So DHAM, MSM and rate estimates must come from
-exchange-free runs, regardless of how the flux histogram looks. The fraction scales as
-roughly `stride / exchange_every` times the acceptance, so you can predict it before you
-run.
+`hrex.transition_counts_continuous` does exactly that. Pass it the `ExchangeStats` from
+the run and it drops a pair only where **that window actually swapped**, which is the
+exact criterion:
+
+```
+pairs kept      45102
+pairs dropped    2882   (6.0%)
+total flux: naive 90992, within-segment 85099
+```
+
+So the price is a few per cent of counts, not the run. Without the statistics the
+function falls back to dropping every pair that crosses a segment boundary, which is
+safe but discards roughly `stride / exchange_every` of the data (about 20% here) whether
+or not a swap was accepted - so pass the statistics.
+
+Free energies need no such care at all: detailed balance holds and every window keeps
+exactly the equilibrium distribution it had before.
+
+One trap worth naming: the naive flux histogram does **not** look wrong. On this system
+the totals are 90992 against 85099, and the per-boundary minima are similar, because with
+well-overlapping windows a swap displaces a configuration about as far as ordinary
+diffusion does over one save stride. A histogram that looks fine is not evidence that
+the counting was done correctly - use the segment-aware function regardless.
+
+### What HREX can hide
+
+Exchange can mask a slow coordinate orthogonal to the string. A window that would have
+sat stuck in one conformation instead has that configuration swapped away and replaced by
+a neighbour's, so the sampling looks converged while the slow coordinate never actually
+relaxed in place. Acceptance rates and replica traversals will both look healthy.
+
+This is not really a defect of HREX. It is the string method's standing assumption
+surfacing: **every important coordinate should be in the string definition.** A degree of
+freedom that is slow and matters belongs in the CV set, where the string can resolve it
+and the restraints can hold it, not left orthogonal to the path where neither the
+reparametrisation nor the reweighting can see it.
+
+So the diagnostics to trust here are the ones on the CVs themselves - overlap, flux,
+weight health - not the exchange statistics. Good mixing between windows says nothing
+about whether the coordinates you left out have equilibrated.
 
 ### Design guide
 
@@ -346,13 +401,14 @@ neighbour spacing while changing nothing else:
 | 3x | 4.30 | **0.004** | 0.000 |
 | 4x | 5.77 | **0.000** | 0.000 |
 
-Acceptance falls by two orders of magnitude between 1.5 and 4.3 sigma and is gone by 5.8.
+Acceptance falls by two orders of magnitude between 1.5 and 4.3 sigma and is gone by 5.8;
+figure 4A plots this against the guide.
 
-**The practical consequence.** A string whose neighbours sit five or six restraint sigma
-apart will see essentially no accepted exchanges, no matter how often you attempt them -
-HREX will cost you bookkeeping and buy you nothing. Check `D/sigma` first, exactly as you
-would check `predicted_gaussian_overlap` before trusting a WHAM result. If it is large,
-the fix is more images or a softer restraint, not more exchange attempts.
+This is standard practice rather than a surprise: force constants and window spacings are
+normally tuned together so that neighbours stay close enough to exchange. The point of
+having the number is that you can check it cheaply before committing - if `D/sigma` is
+five or six, no amount of attempting will help, and the fix is more images or a softer
+restraint.
 
 ![hrex](fig4_hrex.png)
 

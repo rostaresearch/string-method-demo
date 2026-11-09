@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from potential3d import System, straight_string, densify, project_on_path
 from fts import run_string, converged_path
 from sampler import sample_window_set, stability_hint
-from reweight import (binless_wham, pmf_from_weights, pmf_2d_from_weights,
+from reweight import (binless_wham, weight_diagnostics, pmf_from_weights, pmf_2d_from_weights,
                       mean_force_pmf, solve_self_consistent, solve_lbfgs,
                       reduced_bias_matrix)
 from diagnostics import summarise, neighbour_overlap, transition_flux
@@ -98,6 +98,10 @@ def main():
     wham = binless_wham(x_all, path, k, system.kT,
                         n_per_window=prod.shape[1], method="lbfgs")
     print("  solver: %s" % wham["info"])
+    wd = weight_diagnostics(wham["weights"])
+    print("  weight health: Kish ESS %.0f of %d (%.3f%%), max weight %.4f, "
+          "healthy=%s" % (wd["kish_ess"], wd["n_samples"],
+          100 * wd["kish_fraction"], wd["max_weight"], wd["healthy"]))
     print("  window free energies f (kT), first five: %s"
           % np.round(wham["f"][:5], 3).tolist())
 

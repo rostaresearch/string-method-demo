@@ -140,6 +140,50 @@ def binless_wham(x, centres, k, kT, n_per_window=None, method="lbfgs", **kw):
             "N_k": N_k, "u": u}
 
 
+def weight_diagnostics(weights, top_k: int = 10, min_kish_fraction: float = 5e-3,
+                       max_single_weight: float = 0.05):
+    """Health check on the per-sample weights.  ALWAYS look at this.
+
+    Binless WHAM gives every sample a weight w_n proportional to
+    1 / sum_j N_j exp(f_j - u_j(x_n)).  If a sample lands where EVERY window has
+    negligible probability - a rare excursion outside the union of the window supports -
+    the denominator collapses and that one sample can carry a large share of the total
+    probability.  The free energy then rests on a handful of frames no matter how many
+    you collected, and a reweighted PMF will show narrow spikes where those frames fall.
+
+    With restraints on every CV this is easy to hit: the windows cover a thin tube, so
+    anything that wanders out of the tube is outside everything.
+
+    Returns the Kish effective sample size (1 / sum w^2), the largest single weight, and
+    the share carried by the top_k samples.
+
+    The default thresholds are calibrated on this package's own two cases:
+
+      * a converged run (20 images, long production) gives kish_fraction 1.4% and a
+        largest weight of 1.5%, and reproduces the exact barrier to 0.015 kT;
+      * an under-converged run (fewer images, short production) gives kish_fraction
+        0.016% with ONE sample holding 50% of the probability, and is worthless.
+
+    So `max_single_weight = 0.05` asks that no single frame carry more than a twentieth
+    of the distribution, and `min_kish_fraction = 5e-3` asks for at least one effective
+    sample per two hundred collected.  Treat `healthy` as a coarse screen and read the
+    numbers: what matters is kish_ess in absolute terms (a few hundred effective samples
+    is a reasonable basis for a PMF; four is not).
+    """
+    w = np.asarray(weights, dtype=float)
+    w = w / w.sum()
+    n = len(w)
+    kish = 1.0 / float(np.sum(w ** 2))
+    srt = np.sort(w)
+    return {"n_samples": int(n),
+            "kish_ess": kish,
+            "kish_fraction": kish / n,
+            "max_weight": float(srt[-1]),
+            "top_k_share": float(srt[-top_k:].sum()),
+            "healthy": bool(kish / n > min_kish_fraction
+                            and srt[-1] < max_single_weight)}
+
+
 # ------------------------------------------------------------- projections
 def pmf_from_weights(q, weights, kT, bins=60, range_=None):
     """Equation (3): free energy along ANY coordinate, from the sample weights.

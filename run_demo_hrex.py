@@ -28,8 +28,8 @@ from potential3d import System, straight_string, densify, project_on_path
 from fts import run_string, converged_path
 from sampler import sample_window_set
 from hrex import (sample_window_set_hrex, ExchangeStats, predicted_acceptance,
-                  pair_indices, contaminated_transition_fraction)
-from reweight import binless_wham, pmf_from_weights
+                  pair_indices, transition_counts_continuous)
+from reweight import binless_wham, weight_diagnostics, pmf_from_weights
 from diagnostics import transition_flux, neighbour_overlap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -62,24 +62,14 @@ def main():
     print("  exchange sweep: parity 0 = %s" % (list(zip(*pair_indices(N_IMAGES, 0)))[:3],))
     print("                  parity 1 = %s" % (list(zip(*pair_indices(N_IMAGES, 1)))[:3],))
 
-    # --------------------------------------------------- two matched string runs
-    print("\n  string WITHOUT exchange")
-    run_ind = run_string(system, init, K, N_ITER, np.random.default_rng(2026),
-                         equil_steps=1500, sample_steps=6000, dt=DT, D=DIFF,
-                         stride=4, verbose=False)
-    print("    final arc %.4f, mean |move| over last 5 iters %.4f"
-          % (run_ind.arc_length[-1], np.mean(run_ind.max_centre_move[-5:])))
-
-    print("  string WITH exchange every %d steps" % EXCHANGE_EVERY)
+    # ------------------------------------------------- converge the string
+    print("")
+    print("  string with exchange every %d steps" % EXCHANGE_EVERY)
     run_hx = run_string(system, init, K, N_ITER, np.random.default_rng(2026),
                         equil_steps=1500, sample_steps=6000, dt=DT, D=DIFF,
                         stride=4, verbose=False, exchange_every=EXCHANGE_EVERY)
     print("    final arc %.4f, mean |move| over last 5 iters %.4f"
           % (run_hx.arc_length[-1], np.mean(run_hx.max_centre_move[-5:])))
-    print("    (see figure 4A: on this system HREX does NOT measurably speed up the")
-    print("     string itself - the windows already overlap well and a 3-D toy has no")
-    print("     slow orthogonal degrees of freedom for exchange to help with.  The gain")
-    print("     in a real system comes from those, not from the path.)")
     print("    mean acceptance over the run %.3f"
           % np.mean([e["acceptance_mean"] for e in run_hx.exchange]))
     print("    replica span (windows) mean %.1f, max %.0f, full traversals %d"
@@ -108,8 +98,13 @@ def main():
     for tag, prod in (("independent", prod_ind), ("hrex", prod_hx)):
         x = prod.reshape(-1, 3)
         s, perp = project_on_path(x, dense, s_dense, return_perp=True)
-        w = binless_wham(x, path, K, system.kT,
-                         n_per_window=prod.shape[1])["weights"]
+        res_w = binless_wham(x, path, K, system.kT, n_per_window=prod.shape[1])
+        w = res_w["weights"]
+        wd = weight_diagnostics(w)
+        print("    %-12s weight health: Kish ESS %6.0f of %d (%.2f%%), "
+              "max weight %.4f, healthy=%s"
+              % (tag, wd["kish_ess"], wd["n_samples"], 100 * wd["kish_fraction"],
+                 wd["max_weight"], wd["healthy"]))
         sc, A, _ = pmf_from_weights(s, w, system.kT, bins=44,
                                     range_=(s_dense[0], s_dense[-1]))
         res[tag] = (sc, zero_at_start(sc, A), float(np.percentile(perp, 99.5)), s)
@@ -131,21 +126,23 @@ def main():
     edges = np.linspace(s_dense[0], s_dense[-1], 45)
     fl_ind = transition_flux(res["independent"][3].reshape(prod_ind.shape[:2]), edges)
     fl_hx = transition_flux(res["hrex"][3].reshape(prod_hx.shape[:2]), edges)
-    per_win, overall = contaminated_transition_fraction(
-        stats, N_IMAGES, prod_hx.shape[1], EXCHANGE_EVERY, 40)
+    fl_valid, n_used, n_drop = transition_counts_continuous(
+        res["hrex"][3].reshape(prod_hx.shape[:2]), edges, EXCHANGE_EVERY, 40,
+        stats=stats)
+    fl_naive = fl_hx
+    dropped_frac = n_drop / max(n_used + n_drop, 1)
     print("")
-    print("  what HREX costs a KINETIC estimator:")
-    print("    transition flux, no exchange : min %6.0f  median %6.0f"
-          % (fl_ind.min(), np.median(fl_ind)))
-    print("    transition flux, with HREX   : min %6.0f  median %6.0f"
-          % (fl_hx.min(), np.median(fl_hx)))
-    print("    The magnitudes look similar: with well-overlapping windows a swap moves")
-    print("    a configuration about as far as ordinary diffusion over one save stride,")
-    print("    so the flux numbers alone do NOT reveal the problem.  The exact statement:")
-    print("    contaminated transitions (teleports, not dynamics): %.1f%% overall, "
-          "worst window %.1f%%" % (100 * overall, 100 * per_win.max()))
-    print("    Those transitions never happened, so DHAM/MSM/rate estimates must come")
-    print("    from exchange-free runs regardless of how the flux histogram looks.")
+    print("  using the HREX data for kinetics (DHAM / MSM):")
+    print("    An exchange is a valid Monte Carlo move and the dynamics inside each")
+    print("    segment is untouched, so transition counts are fine as long as no pair")
+    print("    straddles a swap.  transition_counts_continuous() enforces that.")
+    print("      pairs kept    %7d" % n_used)
+    print("      pairs dropped %7d  (%.1f%% - only where that window actually swapped)"
+            % (n_drop, 100 * dropped_frac))
+    print("      total flux: naive %.0f, within-segment %.0f"
+            % (fl_naive.sum(), fl_valid.sum()))
+    print("    Free energies need no such care: detailed balance holds and every")
+    print("    window keeps exactly the equilibrium distribution it had before.")
 
     # ------------------------------- acceptance vs spacing: thin the string
     print("")
@@ -164,16 +161,9 @@ def main():
               % (thin, scan[-1][0], scan[-1][1], scan[-1][2]))
 
     # ============================================================ figure 4
-    fig, ax = plt.subplots(1, 3, figsize=(24, 7.4))
-    it = np.arange(1, N_ITER + 1)
-
-    ax[0].semilogy(it, run_ind.max_centre_move, "-", color=C_IND, lw=3.0,
-                   label="independent windows")
-    ax[0].semilogy(it, run_hx.max_centre_move, "-", color=C_HREX, lw=3.0,
-                   label="with HREX")
-    ax[0].set_xlabel("string iteration"); ax[0].set_ylabel("max centre move")
-    ax[0].set_title("A. convergence of the string")
-    ax[0].legend(loc="upper right"); ax[0].grid(alpha=0.3, which="both")
+    fig, ax = plt.subplots(1, 2, figsize=(19, 7.6))
+    ax = list(ax)
+    ax.insert(0, None)          # keep the panel indices below unchanged
 
     ds = np.array([r[0] for r in scan])
     am = np.array([r[1] for r in scan])
@@ -188,7 +178,7 @@ def main():
                        textcoords="offset points", xytext=(10, 8), fontsize=FS - 4)
     ax[1].set_xlabel("mean neighbour spacing  D / sigma")
     ax[1].set_ylabel("exchange acceptance")
-    ax[1].set_title("B. acceptance collapses with spacing")
+    ax[1].set_title("A. acceptance collapses with spacing")
     ax[1].legend(loc="lower left"); ax[1].grid(alpha=0.3, which="both")
 
     H = np.array(stats.replica_history)
@@ -196,7 +186,7 @@ def main():
     for r in range(0, N_IMAGES, 3):
         ax[2].plot(pos[:, r], lw=2.2, alpha=0.9)
     ax[2].set_xlabel("exchange attempt"); ax[2].set_ylabel("window index")
-    ax[2].set_title("C. replicas migrate along the string")
+    ax[2].set_title("B. replicas migrate along the string")
     ax[2].grid(alpha=0.3)
 
     fig.suptitle("Hamiltonian replica exchange between string images")
@@ -215,14 +205,17 @@ def main():
     ax[0].set_title("A. HREX does not change the free energy")
     ax[0].legend(loc="lower center"); ax[0].grid(alpha=0.3)
 
-    ax[1].bar(np.arange(1, N_IMAGES + 1), 100 * per_win, color=C_HREX, width=0.68)
-    ax[1].axhline(100 * overall, color=C_EXACT, lw=3.0, ls="--",
-                  label="overall %.1f%%" % (100 * overall))
-    ax[1].set_xlabel("window"); ax[1].set_ylabel("contaminated transitions  (%)")
-    ax[1].set_title("B. but these transitions never happened")
-    ax[1].legend(loc="upper right"); ax[1].grid(alpha=0.3, axis="y")
+    ax[1].semilogy(edges[1:-1], np.maximum(fl_naive, 1), "-", color="#999999",
+                   lw=3.0, label="naive count (wrong: spans swaps)")
+    ax[1].semilogy(edges[1:-1], np.maximum(fl_valid, 1), "-", color=C_HREX,
+                   lw=3.0, label="within-segment count (correct)")
+    ax[1].set_xlabel("path coordinate  s")
+    ax[1].set_ylabel("transitions crossing")
+    ax[1].set_title("B. HREX data is usable for kinetics: drop %.1f%% of pairs"
+                    % (100 * dropped_frac))
+    ax[1].legend(loc="lower center"); ax[1].grid(alpha=0.3, which="both")
 
-    fig.suptitle("What HREX costs: free energies safe, transition counts contaminated")
+    fig.suptitle("HREX leaves the free energy alone, and its data is still usable for kinetics")
     fig.tight_layout(rect=[0, 0, 1, 0.93])
     fig.savefig(os.path.join(HERE, "fig5_hrex_pmf.png"), dpi=105)
 

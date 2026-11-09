@@ -53,6 +53,7 @@ phase 2: production umbrella sampling on the converged string
 
 phase 3: binless WHAM
   solver: {'iterations': 21, 'converged': True, 'max_gradient': 0.0011067599921261717}
+  weight health: Kish ESS 1147 of 80000 (1.434%), max weight 0.0148, healthy=True
   window free energies f (kT), first five: [0.0, 0.33, 1.234, 2.542, 3.856]
   self-consistent vs L-BFGS on identical data: 1.22e-05 kT (1041 iterations)
 

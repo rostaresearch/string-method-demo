@@ -40,14 +40,16 @@ TWO THINGS TO BE CLEAR ABOUT
    the labels instead is formally equivalent but makes the bookkeeping easy to get
    wrong.
 
-2. THE DYNAMICS IS NO LONGER CONTINUOUS.  An accepted exchange teleports a
-   configuration from one window to another.  Free energies are unaffected - detailed
-   balance is satisfied and the equilibrium distribution of each window is exactly the
-   one it had before - but any estimator that reads *dynamical* information off the
-   trajectory is now invalid.  That includes transition counts, so
-   diagnostics.transition_flux and any DHAM / MSM / rate estimate must be computed from
-   exchange-free runs.  `run_demo_hrex.py` demonstrates both halves of this: the PMF is
-   unchanged, the flux statistics are not meaningful.
+2. THE TRAJECTORY IS PIECEWISE CONTINUOUS.  An accepted exchange teleports a
+   configuration from one window to another, so a frame pair that straddles a swap did
+   not evolve from one to the other.  This does NOT stop you using HREX data for
+   kinetics: DHAM and MSM estimators work perfectly well on it, provided transition
+   pairs are taken only WITHIN a continuous segment between exchanges.  Use
+   `transition_counts_continuous` below instead of a naive count, and you lose only the
+   handful of pairs that cross a swap (about 6% in the demo - see
+   `contaminated_transition_fraction`).  Free energies need no such care at all:
+   detailed balance holds and every window's equilibrium distribution is exactly the one
+   it had before.
 
 With overdamped dynamics there are no velocities, so an exchange is purely positional.
 With a velocity-Verlet / Langevin integrator at a single temperature the velocities can
@@ -154,10 +156,9 @@ def contaminated_transition_fraction(stats, n_windows, n_frames, exchange_every,
     p+1 did not evolve continuously from the last frame of segment p - it belongs to a
     different replica.  Any transition counted across that boundary is an artefact.
 
-    This is the honest way to state what HREX costs a kinetic estimator: not "the flux
-    numbers look different" (they may not, if the windows overlap well and a swap moves
-    a configuration about as far as ordinary diffusion would), but "this percentage of
-    your recorded transitions never happened".
+    This is how many transition pairs you DISCARD when feeding HREX data to DHAM or an
+    MSM - not a reason to discard the run.  Use transition_counts_continuous to do the
+    counting properly; this function just tells you the price, which is small.
 
     returns (per_window_fraction, overall_fraction)
     """
@@ -169,6 +170,77 @@ def contaminated_transition_fraction(stats, n_windows, n_frames, exchange_every,
             np.add.at(bad, np.asarray(swapped), 1.0)
     total = max(n_frames - 1, 1)
     return bad / total, float(bad.sum() / (n_windows * total))
+
+
+def segment_of_frame(n_frames, exchange_every, stride):
+    """Which continuous segment each saved frame belongs to.
+
+    Frames within one segment evolved continuously; a change of segment index means an
+    exchange pass happened in between, so a transition across that boundary is not
+    dynamics.
+    """
+    frames_per_segment = max(exchange_every // stride, 1)
+    return np.arange(n_frames) // frames_per_segment
+
+
+def transition_counts_continuous(s_traj, edges, exchange_every, stride, lag=1,
+                                 stats=None):
+    """Transition counts from HREX data, skipping only genuinely discontinuous pairs.
+
+    This is the correct way to feed replica-exchange trajectories to DHAM or an MSM.
+    The exchange is a valid Monte Carlo move on the extended ensemble and the dynamics
+    inside each segment is untouched, so you simply refuse to count pairs that straddle
+    a swap.
+
+    stats
+        An ExchangeStats from the run.  With it, a pair is dropped only when THAT window
+        actually swapped at the intervening boundary - which is the exact criterion and
+        costs only a few per cent of pairs.  Without it, every pair crossing a segment
+        boundary is dropped, which is safe but throws away roughly stride/exchange_every
+        of the data whether or not a swap was accepted.
+
+    s_traj : (n_windows, n_frames) a 1-D coordinate, time ordered
+    returns (flux, n_used, n_dropped), flux per interior boundary as in
+    diagnostics.transition_flux
+    """
+    s_traj = np.atleast_2d(np.asarray(s_traj, dtype=float))
+    n_win, n_frames = s_traj.shape
+    n_bins = len(edges) - 1
+    fps = max(exchange_every // stride, 1)
+
+    # discontinuity[w, t] = True if frame t did not evolve from frame t-1 for window w
+    disc = np.zeros((n_win, n_frames), dtype=bool)
+    n_boundaries = (n_frames - 1) // fps
+    for p in range(n_boundaries):
+        t = (p + 1) * fps
+        if t >= n_frames:
+            break
+        if stats is not None and p < len(stats.swapped_per_pass):
+            w = np.asarray(stats.swapped_per_pass[p], dtype=int)
+            if len(w):
+                disc[w[w < n_win], t] = True
+        elif stats is None:
+            disc[:, t] = True
+
+    # a pair (t, t+lag) is invalid if any discontinuity falls in (t, t+lag]
+    cum = np.cumsum(disc, axis=1)
+    bad = (cum[:, lag:] - cum[:, :-lag]) > 0
+
+    A = np.zeros((n_bins, n_bins))
+    n_used = n_dropped = 0
+    for w in range(n_win):
+        b = np.clip(np.searchsorted(edges, s_traj[w], side="right") - 1, 0, n_bins - 1)
+        keep = ~bad[w]
+        np.add.at(A, (b[:-lag][keep], b[lag:][keep]), 1.0)
+        n_used += int(keep.sum())
+        n_dropped += int((~keep).sum())
+    np.fill_diagonal(A, 0.0)
+    csum = np.cumsum(np.cumsum(A, axis=0), axis=1)
+    flux = np.empty(n_bins - 1)
+    for bnd in range(1, n_bins):
+        flux[bnd - 1] = ((csum[bnd - 1, -1] - csum[bnd - 1, bnd - 1])
+                         + (csum[-1, bnd - 1] - csum[bnd - 1, bnd - 1]))
+    return flux, n_used, n_dropped
 
 
 def predicted_acceptance(centres, k, kT):
